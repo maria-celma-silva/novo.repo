@@ -1,21 +1,19 @@
 name: Robô Diário Oficial (ETL)
 
-# Configura o gatilho: Quando esse robô deve acordar?
 on:
   schedule:
-    # Roda às 10:00 UTC (07:00 da manhã no horário de Brasília) de Segunda a Sexta.
     - cron: '0 10 * * 1-5'
-  workflow_dispatch: # Permite que você clique em um botão no GitHub para rodar manualmente se quiser
+  workflow_dispatch:
 
 jobs:
   executar_etl:
     runs-on: ubuntu-latest
     steps:
       - name: Baixar o código do repositório
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 
 
       - name: Configurar o Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 
         with:
           python-version: '3.13'
 
@@ -25,10 +23,10 @@ jobs:
       - name: Rodar o Pipeline ETL
         run: python main.py
 
-      - name: Salvar as atualizações do Banco de Dados no GitHub
+      - name: Salvar as atualizações no GitHub
         run: |
           git config --global user.name 'Robô de Monitoramento DOU'
           git config --global user.email 'seu_email@exemplo.com'
-          git add monitoramento_dou.db
-          git commit -m "Atualização automática: Novos registros do DOU" || echo "Nenhuma mudança para salvar"
-          git push
+          git add .
+          git commit -m "Atualização automática: Novos registros do DOU" || echo "Nenhuma mudança para salvar hoje"
+          git push || echo "Nada novo para enviar"
