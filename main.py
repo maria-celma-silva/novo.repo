@@ -1,11 +1,19 @@
 import sqlite3
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
+import time
+
+# Bibliotecas do Selenium
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 
 # ==========================================
-# REGRAS DE NEGÓCIO (Filtros)
+# REGRAS DE NEGÓCIO (Seus Filtros)
 # ==========================================
 ORGAOS_ALVO = [
     "casa civil", 
@@ -23,7 +31,6 @@ PALAVRAS_CHAVE = [
 # INICIALIZAÇÃO DO BANCO
 # ==========================================
 def inicializar_banco():
-    """Garante que o ficheiro do banco de dados exista desde o início."""
     conn = sqlite3.connect("monitoramento_dou.db")
     cursor = conn.cursor()
     cursor.execute('''
@@ -36,42 +43,55 @@ def inicializar_banco():
     ''')
     conn.commit()
     conn.close()
-    print("Banco de dados inicializado (monitoramento_dou.db).")
 
 # ==========================================
-# 1. EXTRAÇÃO (EXTRACT)
+# 1. EXTRAÇÃO AVANÇADA (SELENIUM)
 # ==========================================
-def extrair_dados_dou_real():
-    print("A iniciar a varredura no portal do DOU...")
-    url = "https://www.in.gov.br/consulta/-/buscar/dou?q=INSS&s=todos&exactDate=personalizado&sortType=0"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
+def extrair_dados_selenium():
+    print("Iniciando o Navegador Fantasma (Selenium)...")
+    
+    # Configurações para o navegador rodar em segundo plano (invisível)
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    # Instala e inicia o ChromeDriver automaticamente
+    servico = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=servico, options=chrome_options)
+    
+    textos_extraidos = []
     
     try:
-        resposta = requests.get(url, headers=headers)
-        resposta.raise_for_status()
-        soup = BeautifulSoup(resposta.text, 'html.parser')
-        resultados_html = soup.find_all('div', class_='resultado-busca-item')
+        url = "https://www.in.gov.br/consulta/-/buscar/dou?q=INSS&s=todos&exactDate=personalizado&sortType=0"
+        print("Acessando o portal do Diário Oficial da União...")
+        driver.get(url)
         
-        textos_extraidos = []
-        for item in resultados_html:
-            texto = item.get_text(strip=True)
-            textos_extraidos.append(texto)
+        # O robô espera até 15 segundos para o JavaScript do site carregar os resultados
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "resultado-busca-item"))
+        )
+        
+        # Coleta todas as caixas de texto carregadas
+        resultados = driver.find_elements(By.CLASS_NAME, "resultado-busca-item")
+        
+        for item in resultados:
+            textos_extraidos.append(item.text)
             
-        return textos_extraidos
+        print(f"Sucesso! {len(textos_extraidos)} publicações reais encontradas na página de busca.")
+        
     except Exception as e:
-        print(f"Erro ao aceder ao DOU: {e}")
-        return [
-            "O Presidente do INSTITUTO NACIONAL DO SEGURO SOCIAL resolve nomear João Silva.",
-            "PORTARIA Nº 10. Ministério da Previdência Social. Resolve conceder dispensa Gsiste para Maria Souza."
-        ]
+        print(f"Ocorreu um erro ou a página demorou muito para carregar: {e}")
+    finally:
+        driver.quit() # Fecha o navegador fantasma
+        
+    return textos_extraidos
 
 # ==========================================
-# 2. TRANSFORMAÇÃO (TRANSFORM)
+# 2. TRANSFORMAÇÃO
 # ==========================================
 def aplicar_filtros_estrategicos(dados_brutos):
-    print("A aplicar as regras de filtragem...")
+    print("Aplicando regras de filtragem...")
     dados_processados = []
     
     for texto in dados_brutos:
@@ -91,24 +111,25 @@ def aplicar_filtros_estrategicos(dados_brutos):
     return pd.DataFrame(dados_processados)
 
 # ==========================================
-# 3. CARREGAMENTO (LOAD)
+# 3. CARREGAMENTO
 # ==========================================
 def salvar_no_banco(df_processado):
     if df_processado.empty:
-        print("Nenhuma movimentação relevante encontrada hoje.")
+        print("Nenhuma movimentação relevante com os filtros informados encontrada hoje.")
         return
 
     conn = sqlite3.connect("monitoramento_dou.db")
     df_processado.to_sql('movimentacoes', conn, if_exists='append', index=False)
     conn.close()
-    print(f"Sucesso! {len(df_processado)} registos guardados no banco de dados.")
+    print(f"Banco atualizado! {len(df_processado)} registros oficiais gravados.")
 
 # ==========================================
 # ORQUESTRAÇÃO
 # ==========================================
 if __name__ == "__main__":
-    inicializar_banco()  # <-- Agora o ficheiro é criado logo aqui!
-    textos = extrair_dados_dou_real()
-    if textos:
-        dados_filtrados = aplicar_filtros_estrategicos(textos)
+    inicializar_banco()
+    textos_reais = extrair_dados_selenium()
+    
+    if textos_reais:
+        dados_filtrados = aplicar_filtros_estrategicos(textos_reais)
         salvar_no_banco(dados_filtrados)
